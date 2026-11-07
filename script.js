@@ -1,0 +1,115 @@
+const CLOUD_NAME = "pgoqyqng"; 
+const UPLOAD_PRESET = "galeri_tkj1"; 
+const JSONBIN_KEY = "$2a$10$3CJVDGBgRrLwZwWvRctjFObp8Wm2DxxwtSrftfyKr3QYKy4brksX6"; 
+const JSONBIN_BIN_ID = "6aeeaf6cac6210605a746573"; 
+const JSONBIN_URL = `https://api.jsonbin.io/v3/b/${JSONBIN_BIN_ID}`;
+let appState = { photos: [], votes: { 'Nama 1': 0, 'Nama 2': 0, 'Nama 3': 0, 'Nama 4': 0 }, guestbook: [], currentFilter: 'all', searchQuery: '' };
+
+async function loadState() { try { const res = await fetch(JSONBIN_URL, { headers: { 'X-Master-Key': JSONBIN_KEY } }); const data = await res.json(); if(data.record && data.record.photos) { appState = data.record; refreshAll(); } } catch(e) { console.log("Load failed."); } }
+async function saveState() { try { await fetch(JSONBIN_URL, { method: 'PUT', headers: { 'Content-Type': 'application/json', 'X-Master-Key': JSONBIN_KEY }, body: JSON.stringify(appState) }); } catch(e) { console.log("Save failed."); } }
+function refreshAll() { renderGallery(); renderStack(); renderVoting(); renderGuestbook(); }
+
+document.addEventListener('mousemove', (e) => { const x = (e.clientX / window.innerWidth - 0.5) * 50; const y = (e.clientY / window.innerHeight - 0.5) * 50; document.getElementById('blob1').style.transform = `translate(${x}px, ${y}px)`; document.getElementById('blob2').style.transform = `translate(${-x}px, ${-y}px)`; document.getElementById('blob3').style.transform = `translate(${x*1.5}px, ${y*1.5}px)`; });
+
+let themeIndex = 0; const themes = [{p:'#a78bfa',s:'#60a5fa',t:'#f472b6'}, {p:'#f472b6',s:'#fbbf24',t:'#f87171'}, {p:'#2dd4bf',s:'#3b82f6',t:'#8b5cf6'}];
+function changeTheme() { themeIndex = (themeIndex + 1) % themes.length; const t = themes[themeIndex]; document.documentElement.style.setProperty('--primary', t.p); document.documentElement.style.setProperty('--secondary', t.s); document.documentElement.style.setProperty('--tertiary', t.t); }
+
+function renderGallery() {
+    const grid = document.getElementById('galleryGrid'); grid.innerHTML = '';
+    const filtered = appState.photos.filter(p => (appState.currentFilter === 'all' || p.album === appState.currentFilter) && p.title.toLowerCase().includes(appState.searchQuery.toLowerCase()));
+    if(filtered.length === 0) { grid.innerHTML = '<div class="col-span-full text-center text-gray-500 py-10">Belum ada foto. Klik Upload!</div>'; return; }
+    filtered.forEach(p => {
+        const div = document.createElement('div'); div.className = 'liquid-glass card-3d rounded-xl overflow-hidden relative h-40 md:h-64 cursor-pointer';
+        div.innerHTML = `<img src="${p.url}" class="w-full h-full object-cover" onclick="openLightbox(${p.id})"><div class="absolute bottom-0 w-full p-2 bg-gradient-to-t from-black/80 to-transparent"><p class="text-xs font-bold text-white">${p.title}</p></div>`;
+        div.addEventListener('mousemove', (e) => { const r = div.getBoundingClientRect(); div.style.transform = `rotateX(${((e.clientY-r.top)/r.height - 0.5)*-20}deg) rotateY(${((e.clientX-r.left)/r.width - 0.5)*20}deg) scale(1.05)`; });
+        div.addEventListener('mouseleave', () => { div.style.transform = `rotateX(0) rotateY(0) scale(1)`; });
+        grid.appendChild(div);
+    });
+}
+function searchPhotos() { appState.searchQuery = document.getElementById('searchInput').value; renderGallery(); }
+function filterAlbum(album) { appState.currentFilter = album; document.querySelectorAll('.album-tab').forEach(b => b.classList.remove('tab-active')); event.target.classList.add('tab-active'); renderGallery(); }
+
+let stackCards = [];
+function renderStack() {
+    const stack = document.getElementById('cardStack'); stack.innerHTML = ''; stackCards = [...appState.photos].reverse();
+    if(stackCards.length === 0) { stack.innerHTML = '<div class="text-center text-gray-500 mt-20">Belum ada kartu.</div>'; return; }
+    stackCards.forEach((p, index) => {
+        if (index > 2) return;
+        const card = document.createElement('div'); card.className = `swipe-card liquid-glass rounded-xl overflow-hidden flex flex-col items-center justify-end pb-4`;
+        card.style.zIndex = 10 - index; card.style.transform = `scale(${1 - index * 0.05}) translateY(${index * 10}px)`;
+        card.innerHTML = `<img src="${p.url}" class="absolute inset-0 w-full h-full object-cover pointer-events-none"><div class="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent pointer-events-none"></div><h4 class="relative z-10 font-bold text-lg text-white">${p.title}</h4>`;
+        if (index === 0) {
+            const hammer = new Hammer(card);
+            hammer.on('pan', (e) => { card.style.transform = `translate(${e.deltaX}px, ${e.deltaY}px) rotate(${e.deltaX * 0.1}deg)`; });
+            hammer.on('panend', (e) => { if (e.deltaX > 100) { card.classList.add('swiped-right'); setTimeout(() => { stackCards.shift(); renderStack(); }, 300); } else if (e.deltaX < -100) { card.classList.add('swiped-left'); setTimeout(() => { stackCards.shift(); renderStack(); }, 300); } else { card.style.transform = `scale(1) translateY(0)`; } });
+        }
+        stack.appendChild(card);
+    });
+}
+
+let currentPhotoId = null; let currentZoom = 1;
+function openLightbox(id) { currentPhotoId = id; const p = appState.photos.find(x => x.id === id); if(!p) return; document.getElementById('lightbox').classList.remove('hidden'); document.getElementById('lightboxImage').src = p.url; currentZoom = 1; document.getElementById('lightboxImage').style.transform = `scale(1)`; for(let r of ['❤️', '😂', '🔥']) { document.getElementById(`count-${r}`).innerText = p.reactions[r] || 0; } renderComments(); }
+function closeLightbox() { document.getElementById('lightbox').classList.add('hidden'); }
+function triggerDoubleTapLike() { const p = appState.photos.find(x => x.id === currentPhotoId); p.reactions['❤️'] = (p.reactions['❤️'] || 0) + 1; document.getElementById('count-❤️').innerText = p.reactions['❤️']; const overlay = document.getElementById('likeOverlay'); overlay.innerHTML = '<div class="heart-burst">❤️</div>'; setTimeout(() => overlay.innerHTML = '', 800); saveState(); }
+function addReaction(emoji) { const p = appState.photos.find(x => x.id === currentPhotoId); p.reactions[emoji] = (p.reactions[emoji] || 0) + 1; document.getElementById(`count-${emoji}`).innerText = p.reactions[emoji]; const overlay = document.getElementById('likeOverlay'); const el = document.createElement('div'); el.className = 'floating-emoji'; el.innerText = emoji; el.style.left = Math.random() * 80 + 10 + '%'; el.style.bottom = '10%'; overlay.appendChild(el); setTimeout(() => el.remove(), 1000); saveState(); }
+function downloadImage() { const p = appState.photos.find(x => x.id === currentPhotoId); const a = document.createElement('a'); a.href = p.url; a.download = 'TKJ1_Memory.jpg'; a.target = '_blank'; a.click(); }
+
+function renderComments() { const p = appState.photos.find(x => x.id === currentPhotoId); const list = document.getElementById('commentsList'); list.innerHTML = ''; (p.comments || []).forEach((c, i) => { list.innerHTML += `<div class="flex justify-between items-center bg-white/5 p-2 rounded"><div><b>${c.name}:</b> ${c.text}</div><div class="flex gap-2 text-xs"><button onclick="likeComment(${i})">❤️ ${c.likes || 0}</button><button onclick="deleteComment(${i})" class="text-red-400">Hapus</button></div></div>`; }); }
+function addComment() { const name = document.getElementById('commentName').value || 'Anonim'; const text = document.getElementById('commentText').value; if(!text) return; const p = appState.photos.find(x => x.id === currentPhotoId); p.comments = p.comments || []; p.comments.push({ name, text, likes: 0 }); document.getElementById('commentText').value = ''; document.getElementById('tagSuggestions').classList.add('hidden'); renderComments(); saveState(); }
+function likeComment(index) { const p = appState.photos.find(x => x.id === currentPhotoId); p.comments[index].likes = (p.comments[index].likes || 0) + 1; renderComments(); saveState(); }
+function deleteComment(index) { const p = appState.photos.find(x => x.id === currentPhotoId); p.comments.splice(index, 1); renderComments(); saveState(); }
+function handleTag(input) { const val = input.value; const sugg = document.getElementById('tagSuggestions'); if (val.endsWith('@')) { sugg.classList.remove('hidden'); sugg.innerHTML = ''; ['Nama1', 'Nama2', 'Nama3', 'Nama4'].forEach(name => { sugg.innerHTML += `<div class="p-2 hover:bg-white/20 cursor-pointer" onclick="insertTag('${name}')">@${name}</div>`; }); } else if (!val.includes('@')) { sugg.classList.add('hidden'); } }
+function insertTag(name) { const input = document.getElementById('commentText'); input.value = input.value.replace(/@$/, `@${name} `); document.getElementById('tagSuggestions').classList.add('hidden'); input.focus(); }
+
+let cropper = null; let uploadedImageBase64 = null;
+function openUpload() { document.getElementById('uploadModal').classList.remove('hidden'); }
+function closeUpload() { document.getElementById('uploadModal').classList.add('hidden'); }
+function previewFile(event) { const file = event.target.files[0]; if(!file) return; const reader = new FileReader(); reader.onload = (e) => { uploadedImageBase64 = e.target.result; document.getElementById('previewImg').src = uploadedImageBase64; document.getElementById('previewImg').classList.remove('hidden'); document.getElementById('btnProceed').classList.remove('hidden'); }; reader.readAsDataURL(file); }
+function proceedToCrop() { document.getElementById('dropZone').classList.add('hidden'); document.getElementById('btnProceed').classList.add('hidden'); document.getElementById('cropperArea').classList.remove('hidden'); document.getElementById('editTools').classList.remove('hidden'); document.getElementById('btnSave').classList.remove('hidden'); const image = document.getElementById('imageToCrop'); image.src = uploadedImageBase64; if(cropper) cropper.destroy(); cropper = new Cropper(image, { aspectRatio: 1, viewMode: 1 }); }
+
+async function saveUpload() {
+    if(!cropper) return; const btn = document.getElementById('btnSave'); btn.innerText = "Mengunggah..."; btn.disabled = true;
+    try {
+        const canvas = cropper.getCroppedCanvas({ width: 800, height: 800 }); const filter = document.getElementById('filterSelect').value; const ctx = canvas.getContext('2d');
+        if(filter !== 'none') { if(filter === 'grayscale') ctx.filter = 'grayscale(100%)'; if(filter === 'sepia') ctx.filter = 'sepia(100%)'; if(filter === 'brightness(1.2)') ctx.filter = 'brightness(120%)'; ctx.drawImage(canvas, 0, 0); }
+        const stickerText = document.getElementById('stickerInput').value; if(stickerText) { ctx.filter = 'none'; ctx.font = 'bold 30px sans-serif'; ctx.fillStyle = 'white'; ctx.strokeStyle = 'black'; ctx.lineWidth = 3; ctx.textAlign = 'center'; ctx.strokeText(stickerText, canvas.width/2, canvas.height - 30); ctx.fillText(stickerText, canvas.width/2, canvas.height - 30); }
+        const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.8)); const formData = new FormData(); formData.append('file', blob); formData.append('upload_preset', UPLOAD_PRESET);
+        const cloudRes = await fetch(`https://api.cloudinary.com/v1_1/${CLOUD_NAME}/image/upload`, { method: 'POST', body: formData }); const cloudData = await cloudRes.json();
+        if(cloudData.secure_url) { appState.photos.unshift({ id: Date.now(), url: cloudData.secure_url, title: 'Upload Baru', album: 'all', reactions: { '❤️': 0, '😂': 0, '🔥': 0 }, comments: [] }); await saveState(); alert("Foto berhasil diupload!"); closeUpload(); refreshAll(); } else { alert("Gagal upload."); }
+    } catch (error) { console.error(error); alert("Terjadi kesalahan."); } finally { btn.innerText = "Simpan ke Galeri"; btn.disabled = false; }
+}
+
+function rollRandomMemory() {
+    if(appState.photos.length === 0) return alert("Galeri masih kosong, upload foto dulu!");
+    const overlay = document.createElement('div'); overlay.className = 'fixed inset-0 bg-black/80 z-50 flex flex-col items-center justify-center'; overlay.innerHTML = '<h2 class="text-3xl font-bold mb-8 text-white">Mengacak...</h2><div id="slotImg" class="w-64 h-64 liquid-glass rounded-xl flex items-center justify-center text-5xl">❓</div>'; document.body.appendChild(overlay);
+    let count = 0; const interval = setInterval(() => { const randomPhoto = appState.photos[Math.floor(Math.random() * appState.photos.length)]; document.getElementById('slotImg').innerHTML = `<img src="${randomPhoto.url}" class="w-full h-full object-cover rounded-xl">`; count++; if(count > 15) { clearInterval(interval); confetti({ particleCount: 150, spread: 70, origin: { y: 0.6 } }); setTimeout(() => { overlay.remove(); openLightbox(randomPhoto.id); }, 500); } }, 100);
+}
+
+function renderVoting() {
+    const container = document.getElementById('votingContainer'); container.innerHTML = ''; const total = Object.values(appState.votes).reduce((a,b) => a+b, 0);
+    for(let [name, count] of Object.entries(appState.votes)) { const pct = total === 0 ? 0 : (count/total)*100; container.innerHTML += `<div class="mb-2"><div class="flex justify-between text-sm mb-1"><span>${name}</span><span>${count} vote</span></div><div class="w-full bg-white/10 rounded-full h-4 overflow-hidden cursor-pointer" onclick="vote('${name}')"><div class="bg-[var(--primary)] h-full rounded-full transition-all duration-500" style="width: ${pct}%"></div></div></div>`; }
+}
+function vote(name) { appState.votes[name]++; saveState(); renderVoting(); confetti({ particleCount: 30, origin: { y: 0.8 } }); }
+
+function renderGuestbook() {
+    const container = document.getElementById('guestbookContainer'); container.innerHTML = '<h3 class="text-xl font-bold mb-4 text-center sticky top-0 z-10 bg-black/50 p-2 rounded-lg backdrop-blur">Buku Tamu</h3>';
+    if(appState.guestbook.length === 0) { container.innerHTML += '<div class="text-center text-gray-500 mt-10">Belum ada pesan.</div>'; return; }
+    appState.guestbook.forEach((note, i) => {
+        const div = document.createElement('div'); div.className = 'sticky-note liquid-glass rounded shadow-lg flex flex-col'; div.style.left = note.x + 'px'; div.style.top = note.y + 'px'; div.style.backgroundColor = `hsla(${i * 60}, 70%, 50%, 0.2)`; div.innerHTML = `<b class="text-xs text-white/70">${note.name}</b><p class="text-sm mt-1">${note.text}</p>`;
+        let isDragging = false, startX, startY, origX, origY;
+        div.addEventListener('mousedown', (e) => { isDragging = true; startX = e.clientX; startY = e.clientY; origX = parseInt(div.style.left); origY = parseInt(div.style.top); div.style.zIndex = 100; });
+        document.addEventListener('mousemove', (e) => { if(!isDragging) return; div.style.left = (origX + e.clientX - startX) + 'px'; div.style.top = (origY + e.clientY - startY) + 'px'; });
+        document.addEventListener('mouseup', () => { if(isDragging) { isDragging = false; note.x = parseInt(div.style.left); note.y = parseInt(div.style.top); saveState(); } });
+        container.appendChild(div);
+    });
+}
+
+let isPlaying = false;
+function playMusic() {
+    const audio = document.getElementById('bgMusic');
+    if(isPlaying) audio.pause(); else audio.play();
+    isPlaying = !isPlaying;
+    event.target.innerText = isPlaying ? '⏸️' : '🎵';
+}
+
+loadState(); renderGallery(); renderStack(); renderVoting(); renderGuestbook();
